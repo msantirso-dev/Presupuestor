@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { suggestMappings } from "@/lib/catalog/auto-map";
 import { STANDARD_FIELDS, type StandardField } from "@/lib/catalog/standard-fields";
 import { fetchErrorMessage, parseFetchJson } from "@/lib/http/parse-fetch-json";
+import { parseCsvToGrid, parseXlsxToGridArrayBuffer } from "@/lib/import/parse-grid";
 
 type Mapping = { id: string; sourceColumn: string; targetField: string };
 type Source = { id: string; kind: string; label: string | null; lastSyncedAt: string | null };
@@ -65,31 +67,30 @@ export default function ProveedorDetallePage() {
   async function previewFile(file: File) {
     setErr(null);
     setMsg(null);
-    const fd = new FormData();
-    fd.set("file", file);
-    const r = await fetch("/api/import/preview", { method: "POST", body: fd });
-    const parsed = await parseFetchJson<{
-      headers?: string[];
-      rowCount?: number;
-      suggestedMappings?: Record<string, string>;
-      error?: string;
-    }>(r);
-    if (!parsed.ok || !parsed.data?.headers) {
-      setErr(fetchErrorMessage(parsed) ?? parsed.data?.error ?? "No se pudo leer el archivo");
+    let grid;
+    try {
+      const ab = await file.arrayBuffer();
+      const ext = file.name.toLowerCase().split(".").pop();
+      const isCsv = ext === "csv" || file.type.includes("csv");
+      grid = isCsv
+        ? parseCsvToGrid(new TextDecoder("utf-8").decode(ab))
+        : parseXlsxToGridArrayBuffer(ab);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "No se pudo leer el archivo");
       return;
     }
-    const j = parsed.data;
+    const suggested = suggestMappings(grid.headers);
     const next: Record<string, StandardField | ""> = { ...mapState };
-    for (const h of j.headers as string[]) {
+    for (const h of grid.headers) {
       if (!(h in next)) {
-        const sug = (j.suggestedMappings as Record<string, string>)[h];
+        const sug = suggested[h];
         next[h] = (STANDARD_FIELDS as readonly string[]).includes(sug ?? "")
           ? (sug as StandardField)
           : "";
       }
     }
     setMapState(next);
-    setMsg(`Detectadas ${(j.headers as string[]).length} columnas (${j.rowCount ?? 0} filas).`);
+    setMsg(`Detectadas ${grid.headers.length} columnas (${grid.rows.length} filas).`);
   }
 
   async function saveMappings() {
@@ -114,15 +115,70 @@ export default function ProveedorDetallePage() {
   async function importFile(file: File) {
     setErr(null);
     setMsg(null);
-    const fd = new FormData();
-    fd.set("file", file);
-    const r = await fetch(`/api/providers/${id}/import`, { method: "POST", body: fd });
-    const parsed = await parseFetchJson<{ inserted?: number; error?: string }>(r);
-    if (!parsed.ok || parsed.data == null) {
-      setErr(fetchErrorMessage(parsed) ?? parsed.data?.error ?? "Importación fallida");
+    const ext = file.name.toLowerCase().split(".").pop();
+    const kind: "FILE_CSV" | "FILE_EXCEL" =
+      ext === "csv" || file.type.includes("csv") ? "FILE_CSV" : "FILE_EXCEL";
+
+    let grid;
+    try {
+      const ab = await file.arrayBuffer();
+      grid =
+        kind === "FILE_CSV"
+          ? parseCsvToGrid(new TextDecoder("utf-8").decode(ab))
+          : parseXlsxToGridArrayBuffer(ab);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "No se pudo leer el archivo");
       return;
     }
-    setMsg(`Importados ${parsed.data.inserted ?? 0} productos.`);
+
+    if (grid.headers.length === 0) {
+      setErr("No se detectaron columnas en el archivo");
+      return;
+    }
+    if (grid.rows.length === 0) {
+      setErr("El archivo no tiene filas de datos");
+      return;
+    }
+
+    const batchSize = 100;
+    const rowSlices: (typeof grid.rows)[] = [];
+    for (let i = 0; i < grid.rows.length; i += batchSize) {
+      rowSlices.push(grid.rows.slice(i, i + batchSize));
+    }
+
+    let dataSourceId: string | undefined;
+    let lastTotal = 0;
+    for (let i = 0; i < rowSlices.length; i++) {
+      setMsg(`Importando… ${i + 1} / ${rowSlices.length}`);
+      const r = await fetch(`/api/providers/${id}/import/chunk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataSourceId: dataSourceId ?? undefined,
+          label: i === 0 ? `Import ${file.name}` : undefined,
+          kind,
+          headers: grid.headers,
+          rows: rowSlices[i],
+          finalize: i === rowSlices.length - 1,
+        }),
+      });
+      const parsed = await parseFetchJson<{
+        dataSourceId?: string;
+        insertedChunk?: number;
+        insertedTotal?: number;
+        error?: string;
+      }>(r);
+      if (!parsed.ok || !parsed.data) {
+        setErr(
+          fetchErrorMessage(parsed) ??
+            (typeof parsed.data?.error === "string" ? parsed.data.error : "Importación fallida"),
+        );
+        return;
+      }
+      dataSourceId = parsed.data.dataSourceId;
+      lastTotal = parsed.data.insertedTotal ?? lastTotal + (parsed.data.insertedChunk ?? 0);
+    }
+    setMsg(`Importados ${lastTotal} productos.`);
     await load();
   }
 

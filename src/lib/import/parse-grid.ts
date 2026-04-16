@@ -27,8 +27,7 @@ export function parseCsvToGrid(csvText: string): RawGrid {
   return { headers, rows };
 }
 
-export function parseXlsxToGrid(buffer: Buffer, sheetIndex = 0): RawGrid {
-  const wb = XLSX.read(buffer, { type: "buffer" });
+function workbookToGrid(wb: XLSX.WorkBook, sheetIndex = 0): RawGrid {
   const sheetName = wb.SheetNames[sheetIndex] ?? wb.SheetNames[0];
   if (!sheetName) return { headers: [], rows: [] };
   const sheet = wb.Sheets[sheetName];
@@ -46,4 +45,15 @@ export function parseXlsxToGrid(buffer: Buffer, sheetIndex = 0): RawGrid {
     rows.push(row);
   }
   return { headers, rows };
+}
+
+export function parseXlsxToGrid(buffer: Buffer, sheetIndex = 0): RawGrid {
+  const wb = XLSX.read(buffer, { type: "buffer" });
+  return workbookToGrid(wb, sheetIndex);
+}
+
+/** Para el navegador (evita subir el binario completo y topar el límite ~4.5 MB de Vercel). */
+export function parseXlsxToGridArrayBuffer(ab: ArrayBuffer, sheetIndex = 0): RawGrid {
+  const wb = XLSX.read(new Uint8Array(ab), { type: "array" });
+  return workbookToGrid(wb, sheetIndex);
 }

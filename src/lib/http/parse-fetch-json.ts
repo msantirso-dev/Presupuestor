@@ -31,6 +31,9 @@ export function fetchErrorMessage(
   result: Awaited<ReturnType<typeof parseFetchJson>>,
   fallback = "Error de red o del servidor",
 ) {
+  if (result.status === 413) {
+    return "Archivo o datos demasiado grandes para una sola petición (HTTP 413). Probá dividir el archivo o importar por lotes más chicos.";
+  }
   if (result.emptyBody) {
     return `Respuesta vacía (HTTP ${result.status}). ¿Base de datos conectada?`;
   }
