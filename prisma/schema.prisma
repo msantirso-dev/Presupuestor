@@ -3,8 +3,10 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+  schemas   = ["presupuestor"]
 }
 
 enum SourceKind {
@@ -12,6 +14,8 @@ enum SourceKind {
   FILE_CSV
   GOOGLE_SHEET
   API_STUB
+
+  @@schema("presupuestor")
 }
 
 model Provider {
@@ -25,6 +29,8 @@ model Provider {
   sources   DataSource[]
   mappings  ColumnMapping[]
   products  Product[]
+
+  @@schema("presupuestor")
 }
 
 model DataSource {
@@ -39,6 +45,8 @@ model DataSource {
   updatedAt    DateTime   @updatedAt
 
   products Product[]
+
+  @@schema("presupuestor")
 }
 
 model ColumnMapping {
@@ -49,6 +57,8 @@ model ColumnMapping {
   targetField  String
 
   @@unique([providerId, sourceColumn])
+
+  @@schema("presupuestor")
 }
 
 model Product {
@@ -79,6 +89,8 @@ model Product {
   @@index([name])
   @@index([sku])
   @@index([brand])
+
+  @@schema("presupuestor")
 }
 
 model Quote {
@@ -99,6 +111,8 @@ model Quote {
   updatedAt DateTime @updatedAt
 
   lines QuoteLine[]
+
+  @@schema("presupuestor")
 }
 
 model QuoteLine {
@@ -127,4 +141,6 @@ model QuoteLine {
   updatedAt DateTime @updatedAt
 
   @@index([quoteId])
+
+  @@schema("presupuestor")
 }
