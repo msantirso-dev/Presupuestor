@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SourceKind {
+  FILE_EXCEL
+  FILE_CSV
+  GOOGLE_SHEET
+  API_STUB
+}
+
+model Provider {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sources   DataSource[]
+  mappings  ColumnMapping[]
+  products  Product[]
+}
+
+model DataSource {
+  id           String     @id @default(cuid())
+  providerId   String
+  provider     Provider   @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  kind         SourceKind
+  label        String?
+  config       Json       @default("{}")
+  lastSyncedAt DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  products Product[]
+}
+
+model ColumnMapping {
+  id           String   @id @default(cuid())
+  providerId String
+  provider     Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  sourceColumn String
+  targetField  String
+
+  @@unique([providerId, sourceColumn])
+}
+
+model Product {
+  id           String      @id @default(cuid())
+  providerId   String
+  provider     Provider    @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  dataSourceId String?
+  dataSource   DataSource? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+
+  sku         String?
+  name        String
+  description String? @db.Text
+  brand       String?
+
+  costPrice Decimal? @db.Decimal(14, 4)
+  listPrice Decimal? @db.Decimal(14, 4)
+  currency  String?  @default("ARS")
+  stock     Int?
+
+  raw Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quoteLines QuoteLine[]
+
+  @@index([providerId])
+  @@index([name])
+  @@index([sku])
+  @@index([brand])
+}
+
+model Quote {
+  id           String   @id @default(cuid())
+  number       String   @unique
+  clientName   String
+  clientEmail  String?
+  clientPhone  String?
+  issueDate    DateTime @default(now())
+  notes        String?  @db.Text
+
+  discountPercent Decimal @default(0) @db.Decimal(7, 4)
+
+  subtotal Decimal @default(0) @db.Decimal(16, 4)
+  total    Decimal @default(0) @db.Decimal(16, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines QuoteLine[]
+}
+
+model QuoteLine {
+  id      String @id @default(cuid())
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sortOrder Int      @default(0)
+
+  sku          String?
+  name         String
+  description  String? @db.Text
+  brand        String?
+  providerName String
+
+  quantity            Decimal @default(1) @db.Decimal(14, 4)
+  unitCost            Decimal @db.Decimal(14, 4)
+  marginPercent       Decimal @default(0) @db.Decimal(9, 4)
+  lineDiscountPercent Decimal @default(0) @db.Decimal(9, 4)
+
+  lineSubtotal Decimal @db.Decimal(16, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([quoteId])
+}
